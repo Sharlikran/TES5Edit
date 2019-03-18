@@ -35,8 +35,26 @@ uses
 
   procedure wbScriptPropertyToStr(var aValue: string; aBasePtr: Pointer; aEndPtr: Pointer; const aElement: IwbElement; aType: TwbCallbackType);
 
+  procedure wbRGBAToStr(var aValue: string; aBasePtr: Pointer; aEndPtr: Pointer; const aElement: IwbElement; aType: TwbCallbackType);
+
+  procedure wbVec3ToStr(var aValue: string; aBasePtr: Pointer; aEndPtr: Pointer; const aElement: IwbElement; aType: TwbCallbackType);
+
   /// <summary>Calls and returns wbGetScriptObjFormat. Used for VMAD parsing.</summary>
   function wbScriptObjFormatDecider(aBasePtr: Pointer; aEndPtr: Pointer; const aElement: IwbElement): Integer;
+
+//  function wbIntVec3(const aName: string): IwbValueDef;
+//
+//  function wbIntVec3U16(const aName: string): IwbValueDef;
+//
+//  function wbIntVec3Named(const aSignature: TwbSignature; const aName: string): IwbValueDef;
+//
+//  function wbVec3(const aName: string): IwbValueDef;
+//
+//  function wbVec3Named(const aSignature: TwbSignature; const aName: string): IwbValueDef;
+//
+//  function wbVec3SK(const aSortKey: array of Integer; const aName: string): IwbValueDef;
+//
+//  function wbVec3Rotation: IwbValueDef;
 
 implementation
 
@@ -744,12 +762,137 @@ begin
     aValue := PropertyType + ' ' + PropertyName;
 end;
 
+procedure wbRGBAToStr(var aValue: string; aBasePtr: Pointer; aEndPtr: Pointer; const aElement: IwbElement; aType: TwbCallbackType);
+var
+  Container: IwbContainerElementRef;
+  A: IwbElement;
+  R, G, B, RGB: string;
+  AlphaDefType: TwbDefType;
+begin
+  if aType <> ctToStr then
+    Exit;
+
+  if not Supports(aElement, IwbContainerElementRef, Container) then
+    Exit;
+
+  if Container.Collapsed <> tbTrue then
+    Exit;
+
+  R := Container.Elements[0].Value;
+  G := Container.Elements[1].Value;
+  B := Container.Elements[2].Value;
+  A := Container.Elements[3];
+
+  RGB := 'RGB(' + R + ', ' + G + ', ' + B + ')';
+
+  // handle RGB only
+  if not Assigned(A) then
+  begin
+    aValue := RGB;
+    Exit;
+  end;
+
+  // handle RGBA
+  AlphaDefType := A.Def.DefType;
+
+  if not (AlphaDefType = dtByteArray) then
+    aValue := 'RGBA(' + R + ', ' + G + ', ' + B + ', ' + A.Value + ')'
+  else
+    aValue := RGB;
+end;
+
+procedure wbVec3ToStr(var aValue: string; aBasePtr: Pointer; aEndPtr: Pointer; const aElement: IwbElement; aType: TwbCallbackType);
+var
+  Container: IwbContainerElementRef;
+  X, Y, Z: string;
+begin
+  if aType <> ctToStr then
+    Exit;
+
+  if not Supports(aElement, IwbContainerElementRef, Container) then
+    Exit;
+
+  if Container.Collapsed <> tbTrue then
+    Exit;
+
+  X := Container.Elements[0].Value;
+  Y := Container.Elements[1].Value;
+  Z := Container.Elements[2].Value;
+
+  aValue := 'Vec3(' + X + ', ' + Y + ', ' + Z + ')';
+end;
+
 {>>> For VMAD <<<}
 
 function wbScriptObjFormatDecider(aBasePtr: Pointer; aEndPtr: Pointer; const aElement: IwbElement): Integer;
 begin
   Result := wbGetScriptObjFormat(aElement);
 end;
+
+{>>> For Definitions <<<}
+
+//function wbIntVec3(const aName: string): IwbValueDef;
+//begin
+//  Result := wbStruct(aName, [
+//    wbInteger('X', itU8),
+//    wbInteger('Y', itU8),
+//    wbInteger('Z', itU8)
+//  ]).SetToStr(wbVec3ToStr).IncludeFlag(dfCollapsed, wbCollapseVec3);
+//end;
+//
+//function wbIntVec3U16(const aName: string): IwbValueDef;
+//begin
+//  Result := wbStruct(aName, [
+//    wbInteger('X', itU16),
+//    wbInteger('Y', itU16),
+//    wbInteger('Z', itU16)
+//  ]).SetToStr(wbVec3ToStr).IncludeFlag(dfCollapsed, wbCollapseVec3);
+//end;
+//
+//function wbIntVec3Named(const aSignature: TwbSignature; const aName: string): IwbValueDef;
+//begin
+//  Result := wbStruct(aSignature, aName, [
+//    wbInteger('X', itS16),
+//    wbInteger('Y', itS16),
+//    wbInteger('Z', itS16)
+//  ]).SetToStr(wbVec3ToStr).IncludeFlag(dfCollapsed, wbCollapseVec3)
+//end;
+//
+//function wbVec3(const aName: string): IwbValueDef;
+//begin
+//  Result := wbStruct(aName, [
+//    wbFloat('X'),
+//    wbFloat('Y'),
+//    wbFloat('Z')
+//  ]).SetToStr(wbVec3ToStr).IncludeFlag(dfCollapsed, wbCollapseVec3);
+//end;
+//
+//function wbVec3Named(const aSignature: TwbSignature; const aName: string): IwbValueDef;
+//begin
+//  Result := wbStruct(aSignature, aName, [
+//    wbFloat('X'),
+//    wbFloat('Y'),
+//    wbFloat('Z')
+//  ]).SetToStr(wbVec3ToStr).IncludeFlag(dfCollapsed, wbCollapseVec3);
+//end;
+//
+//function wbVec3SK(const aSortKey: array of Integer; const aName: string): IwbValueDef;
+//begin
+//  Result := wbStructSK(aSortKey, aName, [
+//    wbFloat('X'),
+//    wbFloat('Y'),
+//    wbFloat('Z')
+//  ]).SetToStr(wbVec3ToStr).IncludeFlag(dfCollapsed, wbCollapseVec3);
+//end;
+//
+//function wbVec3Rotation: IwbValueDef;
+//begin
+//  Result := wbStruct('Rotation', [
+//    wbFloat('X', cpNormal, True, wbRotationFactor, wbRotationScale, nil, RadiansNormalize),
+//    wbFloat('Y', cpNormal, True, wbRotationFactor, wbRotationScale, nil, RadiansNormalize),
+//    wbFloat('Z', cpNormal, True, wbRotationFactor, wbRotationScale, nil, RadiansNormalize)
+//  ]).SetToStr(wbVec3ToStr).IncludeFlag(dfCollapsed, wbCollapseVec3);
+//end;
 
 end.
 
