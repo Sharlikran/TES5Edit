@@ -73,21 +73,6 @@ begin
   aContainer := Container;
 end;
 
-function wbTryGetMainRecord(aElement: IwbElement): IwbMainRecord;
-var
-  MainRecord: IwbMainRecord;
-begin
-  Result := nil;
-
-  if not Assigned(aElement) then
-    Exit;
-
-  if not Supports(aElement.LinksTo, IwbMainRecord, MainRecord) then
-    Exit;
-
-  Result := MainRecord;
-end;
-
 /// <summary>Generates "{Count}x {FormID}" string for item. Supports single and double structs.</summary>
 /// <param name="aContainer">The Item element</param>
 /// <returns>string</return>
@@ -376,54 +361,57 @@ end;
 procedure wbFactionToStr(var aValue: string; aBasePtr: Pointer; aEndPtr: Pointer; const aElement: IwbElement; aType: TwbCallbackType);
 var
   Container: IwbContainerElementRef;
-  FormID, Rank: IwbElement;
-  MainRecord: IwbMainRecord;
+  Faction, Rank: IwbElement;
   NativeRank: integer;
 begin
   wbTrySetContainer(aElement, aType, Container);
   if Container = nil then
     Exit;
 
-  FormID := wbTryGetMainRecord(Container.Elements[0]);
-  if not Assigned(FormID) then
+  Faction := Container.Elements[0];
+  if not Assigned(Faction) then
     Exit;
 
   Rank := Container.Elements[1];
-  NativeRank := Rank.NativeValue;
 
-  aValue := MainRecord.ShortName + ' {Rank: ' + IntToStr(NativeRank) + '}';
+  aValue := Faction.Value;
+
+  if Assigned(Rank) then
+  begin
+    NativeRank := Rank.NativeValue;
+    aValue := aValue + ' {Rank: ' + IntToStr(NativeRank) + '}';
+  end;
 end;
 
 procedure wbFactionRelationToStr(var aValue: string; aBasePtr: Pointer; aEndPtr: Pointer; const aElement: IwbElement; aType: TwbCallbackType);
 var
   Container: IwbContainerElementRef;
-  FormID, Rank, CombatReaction: IwbElement;
-  MainRecord: IwbMainRecord;
-  RankMod: string;
+  Faction, Rank: IwbElement;
   NativeRank: integer;
 begin
   wbTrySetContainer(aElement, aType, Container);
   if Container = nil then
     Exit;
 
-  FormID := wbTryGetMainRecord(Container.Elements[0]);
-  if not Assigned(FormID) then
+  Faction := Container.Elements[0];
+  if not Assigned(Faction) then
     Exit;
 
   Rank := Container.Elements[1];
-  NativeRank := Rank.NativeValue;
+
+  aValue := Faction.Value;
 
   if wbGameMode = gmTES4 then
   begin
+    NativeRank := Rank.NativeValue;
     if NativeRank >= 0 then
-      aValue := '+' + IntToStr(NativeRank) + ' ' + MainRecord.ShortName
+      aValue := '+' + IntToStr(NativeRank) + ' ' + aValue
     else
-      aValue := IntToStr(NativeRank) + ' ' + MainRecord.ShortName;
+      aValue := IntToStr(NativeRank) + ' ' + aValue;
     Exit;
   end;
 
-  CombatReaction := Container.Elements[2];
-  aValue := CombatReaction.Value + ' ' + MainRecord.ShortName;
+  aValue := Container.Elements[2].Value + ' ' + aValue;
 end;
 
 procedure wbModelToStr(var aValue: string; aBasePtr: Pointer; aEndPtr: Pointer; const aElement: IwbElement; aType: TwbCallbackType);
