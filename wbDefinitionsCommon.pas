@@ -42,20 +42,6 @@ uses
   /// <summary>Calls and returns wbGetScriptObjFormat. Used for VMAD parsing.</summary>
   function wbScriptObjFormatDecider(aBasePtr: Pointer; aEndPtr: Pointer; const aElement: IwbElement): Integer;
 
-//  function wbIntVec3(const aName: string): IwbValueDef;
-//
-//  function wbIntVec3U16(const aName: string): IwbValueDef;
-//
-//  function wbIntVec3Named(const aSignature: TwbSignature; const aName: string): IwbValueDef;
-//
-//  function wbVec3(const aName: string): IwbValueDef;
-//
-//  function wbVec3Named(const aSignature: TwbSignature; const aName: string): IwbValueDef;
-//
-//  function wbVec3SK(const aSortKey: array of Integer; const aName: string): IwbValueDef;
-//
-//  function wbVec3Rotation: IwbValueDef;
-
 implementation
 
 uses
@@ -68,6 +54,39 @@ const
   CTDA: TwbSignature = 'CTDA';
 
 {>>> For Collapsible Fields <<<}
+
+procedure wbTrySetContainer(const aElement: IwbElement; aType: TwbCallbackType; var aContainer: IwbContainerElementRef);
+var
+  Container: IwbContainerElementRef;
+begin
+  aContainer := nil;
+
+  if aType <> ctToStr then
+    Exit;
+
+  if not Supports(aElement, IwbContainerElementRef, Container) then
+    Exit;
+
+  if Container.Collapsed <> tbTrue then
+    Exit;
+
+  aContainer := Container;
+end;
+
+function wbTryGetMainRecord(aElement: IwbElement): IwbMainRecord;
+var
+  MainRecord: IwbMainRecord;
+begin
+  Result := nil;
+
+  if not Assigned(aElement) then
+    Exit;
+
+  if not Supports(aElement.LinksTo, IwbMainRecord, MainRecord) then
+    Exit;
+
+  Result := MainRecord;
+end;
 
 /// <summary>Generates "{Count}x {FormID}" string for item. Supports single and double structs.</summary>
 /// <param name="aContainer">The Item element</param>
@@ -110,7 +129,7 @@ begin
   while Assigned(Container) and (Container.ElementType <> etSubRecord) do
     Container := Container.Container;
 
-  if not Assigned(Container) then
+  if Container = nil then
     Exit;
 
   ObjFormat := Container.ElementNativeValues['Object Format'];
@@ -124,12 +143,12 @@ end;
 /// <returns>string from TStringList.CommaText</returns>
 function wbGetPropertyValueArrayItems(const aContainer: IwbContainerElementRef): string;
 var
-  i: Integer;
-  ObjectVersion, ItemName: string;
   ObjectUnion: IwbContainerElementRef;
   FormID, Alias: IwbElement;
   MainRecord: IwbMainRecord;
   Items: TStringList;
+  ObjectVersion, ItemName: string;
+  i: Integer;
 begin
   Items := TStringList.Create;
 
@@ -164,31 +183,45 @@ begin
   Items.Free;
 end;
 
+procedure wbBuildConditionStrWithOperators(const Container: IwbContainerElementRef; Typ: Byte; var aValue: string);
+begin
+  case Typ and $E0 of
+    $00: aValue := aValue + ' = ';
+    $20: aValue := aValue + ' <> ';
+    $40: aValue := aValue + ' > ';
+    $60: aValue := aValue + ' >= ';
+    $80: aValue := aValue + ' < ';
+    $A0: aValue := aValue + ' <= ';
+  end;
+
+  aValue := aValue + Container.Elements[2].Value;
+
+  if (Typ and $01) = 0 then
+    aValue := aValue + ' AND'
+  else
+    aValue := aValue + ' OR';
+end;
+
 // TODO: merge wbConditionToStr* procedures
 procedure wbConditionToStrFNV(var aValue: string; aBasePtr: Pointer; aEndPtr: Pointer; const aElement: IwbElement; aType: TwbCallbackType);
 var
-  Condition: IwbContainerElementRef;
+  Container: IwbContainerElementRef;
   RunOn, Param1, Param2: IwbElement;
   Typ: Byte;
   i: Integer;
 begin
-  if aType <> ctToStr then
+  wbTrySetContainer(aElement, aType, Container);
+  if Container = nil then
     Exit;
 
-  if not Supports(aElement, IwbContainerElementRef, Condition) then
-    Exit;
+  Typ := Container.Elements[0].NativeValue;
 
-  if Condition.Collapsed <> tbTrue then
-    Exit;
-
-  Typ := Condition.Elements[0].NativeValue;
-
-  if (Condition.ElementCount >= 9) and (Condition.Elements[7].Def.DefType <> dtEmpty) and (Condition.Elements[8].Def.DefType <> dtEmpty) then
+  if (Container.ElementCount >= 9) and (Container.Elements[7].Def.DefType <> dtEmpty) and (Container.Elements[8].Def.DefType <> dtEmpty) then
   begin
-    i := Condition.Elements[3].NativeValue;
-    RunOn := Condition.Elements[7];
+    i := Container.Elements[3].NativeValue;
+    RunOn := Container.Elements[7];
     if (i <> 106) and (i <> 285) and (RunOn.NativeValue = 2) then
-      aValue := Condition.Elements[8].Value
+      aValue := Container.Elements[8].Value
     else
       aValue := RunOn.Value;
   end
@@ -198,57 +231,38 @@ begin
     else
       aValue := 'Target';
 
-  aValue := aValue + '.' + Condition.Elements[3].Value;
+  aValue := aValue + '.' + Container.Elements[3].Value;
 
-  Param1 := Condition.Elements[5];
+  Param1 := Container.Elements[5];
   if Param1.ConflictPriority <> cpIgnore then
   begin
     aValue := aValue + '(' {+ Param1.Name + ': '} + Param1.Value;
-    Param2 := Condition.Elements[6];
+    Param2 := Container.Elements[6];
     if Param2.ConflictPriority <> cpIgnore then
       aValue := aValue + ', ' {+ Param2.Name + ': '} + Param2.Value;
     aValue := aValue + ')';
   end;
 
-  case Typ and $E0 of
-    $00: aValue := aValue + ' = ';
-    $20: aValue := aValue + ' <> ';
-    $40: aValue := aValue + ' > ';
-    $60: aValue := aValue + ' >= ';
-    $80: aValue := aValue + ' < ';
-    $A0: aValue := aValue + ' <= ';
-  end;
-
-  aValue := aValue + Condition.Elements[2].Value;
-
-  if (Typ and $01) = 0 then
-    aValue := aValue + ' AND'
-  else
-    aValue := aValue + ' OR';
+  wbBuildConditionStrWithOperators(Container, Typ, aValue);
 end;
 
 procedure wbConditionToStrFO3(var aValue: string; aBasePtr: Pointer; aEndPtr: Pointer; const aElement: IwbElement; aType: TwbCallbackType);
 var
-  Condition: IwbContainerElementRef;
+  Container: IwbContainerElementRef;
   RunOn, Param1, Param2: IwbElement;
   Typ: Byte;
 begin
-  if aType <> ctToStr then
+  wbTrySetContainer(aElement, aType, Container);
+  if Container = nil then
     Exit;
 
-  if not Supports(aElement, IwbContainerElementRef, Condition) then
-    Exit;
+  Typ := Container.Elements[0].NativeValue;
 
-  if Condition.Collapsed <> tbTrue then
-    Exit;
-
-  Typ := Condition.Elements[0].NativeValue;
-
-  if (Condition.ElementCount >= 9) and (Condition.Elements[7].Def.DefType <> dtEmpty) and (Condition.Elements[8].Def.DefType <> dtEmpty) then
+  if (Container.ElementCount >= 9) and (Container.Elements[7].Def.DefType <> dtEmpty) and (Container.Elements[8].Def.DefType <> dtEmpty) then
   begin
-    RunOn := Condition.Elements[7];
+    RunOn := Container.Elements[7];
     if RunOn.NativeValue = 2 then
-      aValue := Condition.Elements[8].Value
+      aValue := Container.Elements[8].Value
     else
       aValue := RunOn.Value;
   end
@@ -258,102 +272,64 @@ begin
     else
       aValue := 'Target';
 
-  aValue := aValue + '.' + Condition.Elements[3].Value;
+  aValue := aValue + '.' + Container.Elements[3].Value;
 
-  Param1 := Condition.Elements[5];
+  Param1 := Container.Elements[5];
   if Param1.ConflictPriority <> cpIgnore then
   begin
     aValue := aValue + '(' {+ Param1.Name + ': '} + Param1.Value;
-    Param2 := Condition.Elements[6];
+    Param2 := Container.Elements[6];
     if Param2.ConflictPriority <> cpIgnore then
       aValue := aValue + ', ' {+ Param2.Name + ': '} + Param2.Value;
     aValue := aValue + ')';
   end;
 
-  case Typ and $E0 of
-    $00: aValue := aValue + ' = ';
-    $20: aValue := aValue + ' <> ';
-    $40: aValue := aValue + ' > ';
-    $60: aValue := aValue + ' >= ';
-    $80: aValue := aValue + ' < ';
-    $A0: aValue := aValue + ' <= ';
-  end;
-
-  aValue := aValue + Condition.Elements[2].Value;
-
-  if (Typ and $01) = 0 then
-    aValue := aValue + ' AND'
-  else
-    aValue := aValue + ' OR';
+  wbBuildConditionStrWithOperators(Container, Typ, aValue);
 end;
 
 procedure wbConditionToStrTES4(var aValue: string; aBasePtr: Pointer; aEndPtr: Pointer; const aElement: IwbElement; aType: TwbCallbackType);
 var
-  Condition: IwbContainerElementRef;
+  Container: IwbContainerElementRef;
   Param1, Param2: IwbElement;
   Typ: Byte;
 begin
-  if aType <> ctToStr then
+  wbTrySetContainer(aElement, aType, Container);
+  if Container = nil then
     Exit;
 
-  if not Supports(aElement, IwbContainerElementRef, Condition) then
-    Exit;
-
-  if Condition.Collapsed <> tbTrue then
-    Exit;
-
-  Typ := Condition.Elements[0].NativeValue;
+  Typ := Container.Elements[0].NativeValue;
   if (Typ and $02) = 0 then
     aValue := 'Subject'
   else
     aValue := 'Target';
 
-  aValue := aValue + '.' + Condition.Elements[3].Value;
+  aValue := aValue + '.' + Container.Elements[3].Value;
 
-  Param1 := Condition.Elements[5];
+  Param1 := Container.Elements[5];
   if Param1.ConflictPriority <> cpIgnore then
   begin
     aValue := aValue + '(' {+ Param1.Name + ': '} + Param1.Value;
-    Param2 := Condition.Elements[6];
+    Param2 := Container.Elements[6];
     if Param2.ConflictPriority <> cpIgnore then
       aValue := aValue + ', ' {+ Param2.Name + ': '} + Param2.Value;
     aValue := aValue + ')';
   end;
 
-  case Typ and $E0 of
-    $00: aValue := aValue + ' = ';
-    $20: aValue := aValue + ' <> ';
-    $40: aValue := aValue + ' > ';
-    $60: aValue := aValue + ' >= ';
-    $80: aValue := aValue + ' < ';
-    $A0: aValue := aValue + ' <= ';
-  end;
-
-  aValue := aValue + Condition.Elements[2].Value;
-
-  if (Typ and $01) = 0 then
-    aValue := aValue + ' AND'
-  else
-    aValue := aValue + ' OR';
+  wbBuildConditionStrWithOperators(Container, Typ, aValue);
 end;
 
 procedure wbConditionToStrTES5(var aValue: string; aBasePtr: Pointer; aEndPtr: Pointer; const aElement: IwbElement; aType: TwbCallbackType);
 var
-  Condition: IwbContainerElementRef;
+  Container: IwbContainerElementRef;
   lCTDA: IwbContainerElementRef;
   RunOn, Param1, Param2: IwbElement;
   Typ: Byte;
 begin
-  if aType <> ctToStr then
+  wbTrySetContainer(aElement, aType, Container);
+  if Container = nil then
     Exit;
 
-  if not Supports(aElement, IwbContainerElementRef, Condition) then
-    Exit;
-
-  if Condition.Collapsed <> tbTrue then
-    Exit;
-
-  if not Supports(Condition.RecordBySignature[CTDA], IwbContainerElementRef, lCTDA) then
+  if not Supports(Container.RecordBySignature[CTDA], IwbContainerElementRef, lCTDA) then
     Exit;
 
   RunOn := lCTDA.Elements[7];
@@ -376,21 +352,7 @@ begin
 
   Typ := lCTDA.Elements[0].NativeValue;
 
-  case Typ and $E0 of
-    $00: aValue := aValue + ' = ';
-    $20: aValue := aValue + ' <> ';
-    $40: aValue := aValue + ' > ';
-    $60: aValue := aValue + ' >= ';
-    $80: aValue := aValue + ' < ';
-    $A0: aValue := aValue + ' <= ';
-  end;
-
-  aValue := aValue + lCTDA.Elements[2].Value;
-
-  if (Typ and $01) = 0 then
-    aValue := aValue + ' AND'
-  else
-    aValue := aValue + ' OR';
+  wbBuildConditionStrWithOperators(lCTDA, Typ, aValue);
 end;
 
 procedure wbEquipSlotToStr(var aValue: string; aBasePtr: Pointer; aEndPtr: Pointer; const aElement: IwbElement; aType: TwbCallbackType);
@@ -398,13 +360,8 @@ var
   Container: IwbContainerElementRef;
   EquipSlot, EquipNode: IwbElement;
 begin
-  if aType <> ctToStr then
-    Exit;
-
-  if not Supports(aElement, IwbContainerElementRef, Container) then
-    Exit;
-
-  if Container.Collapsed <> tbTrue then
+  wbTrySetContainer(aElement, aType, Container);
+  if Container = nil then
     Exit;
 
   EquipSlot := Container.ElementBySignature['QNAM'];
@@ -423,20 +380,12 @@ var
   MainRecord: IwbMainRecord;
   NativeRank: integer;
 begin
-  if aType <> ctToStr then
+  wbTrySetContainer(aElement, aType, Container);
+  if Container = nil then
     Exit;
 
-  if not Supports(aElement, IwbContainerElementRef, Container) then
-    Exit;
-
-  if Container.Collapsed <> tbTrue then
-    Exit;
-
-  FormID := Container.Elements[0];
+  FormID := wbTryGetMainRecord(Container.Elements[0]);
   if not Assigned(FormID) then
-    Exit;
-
-  if not Supports(FormID.LinksTo, IwbMainRecord, MainRecord) then
     Exit;
 
   Rank := Container.Elements[1];
@@ -453,26 +402,19 @@ var
   RankMod: string;
   NativeRank: integer;
 begin
-  if aType <> ctToStr then
+  wbTrySetContainer(aElement, aType, Container);
+  if Container = nil then
     Exit;
 
-  if not Supports(aElement, IwbContainerElementRef, Container) then
-    Exit;
-
-  if Container.Collapsed <> tbTrue then
-    Exit;
-
-  FormID := Container.Elements[0];
+  FormID := wbTryGetMainRecord(Container.Elements[0]);
   if not Assigned(FormID) then
-    Exit;
-
-  if not Supports(FormID.LinksTo, IwbMainRecord, MainRecord) then
     Exit;
 
   Rank := Container.Elements[1];
   NativeRank := Rank.NativeValue;
 
-  if wbGameMode = gmTES4 then begin
+  if wbGameMode = gmTES4 then
+  begin
     if NativeRank >= 0 then
       aValue := '+' + IntToStr(NativeRank) + ' ' + MainRecord.ShortName
     else
@@ -486,42 +428,32 @@ end;
 
 procedure wbModelToStr(var aValue: string; aBasePtr: Pointer; aEndPtr: Pointer; const aElement: IwbElement; aType: TwbCallbackType);
 var
-  Model: IwbContainerElementRef;
+  Container: IwbContainerElementRef;
 begin
-  if aType <> ctToStr then
+  wbTrySetContainer(aElement, aType, Container);
+  if Container = nil then
     Exit;
 
-  if not Supports(aElement, IwbContainerElementRef, Model) then
-    Exit;
-
-  if Model.Collapsed <> tbTrue then
-    Exit;
-
-  aValue := Model.Elements[0].Value;
+  aValue := Container.Elements[0].Value;
 end;
 
 procedure wbObjectBoundsToStr(var aValue: string; aBasePtr: Pointer; aEndPtr: Pointer; const aElement: IwbElement; aType: TwbCallbackType);
 var
-  OBND: IwbContainerElementRef;
+  Container: IwbContainerElementRef;
   FacetPointA, FacetPointB: string;
   X1, X2, Y1, Y2, Z1, Z2: IwbElement;
 begin
-  if aType <> ctToStr then
+  wbTrySetContainer(aElement, aType, Container);
+  if Container = nil then
     Exit;
 
-  if not Supports(aElement, IwbContainerElementRef, OBND) then
-    Exit;
+  X1 := Container.Elements[0];
+  Y1 := Container.Elements[1];
+  Z1 := Container.Elements[2];
 
-  if OBND.Collapsed <> tbTrue then
-    Exit;
-
-  X1 := OBND.Elements[0];
-  Y1 := OBND.Elements[1];
-  Z1 := OBND.Elements[2];
-
-  X2 := OBND.Elements[3];
-  Y2 := OBND.Elements[4];
-  Z2 := OBND.Elements[5];
+  X2 := Container.Elements[3];
+  Y2 := Container.Elements[4];
+  Z2 := Container.Elements[5];
 
   FacetPointA := X1.Value + ', ' + Y1.Value + ', ' + Z1.Value;
   FacetPointB := X2.Value + ', ' + Y2.Value + ', ' + Z2.Value;
@@ -535,13 +467,8 @@ var
   ActorValueForm, ActorValueData, CurveTableForm: IwbElement;
   MainRecord: IwbMainRecord;
 begin
-  if aType <> ctToStr then
-    Exit;
-
-  if not Supports(aElement, IwbContainerElementRef, Container) then
-    Exit;
-
-  if Container.Collapsed <> tbTrue then
+  wbTrySetContainer(aElement, aType, Container);
+  if Container = nil then
     Exit;
 
   ActorValueForm := Container.ElementByName['Actor Value'];
@@ -577,13 +504,8 @@ var
   Container: IwbContainerElementRef;
   ItemString: string;
 begin
-  if aType <> ctToStr then
-    Exit;
-
-  if not Supports(aElement, IwbContainerElementRef, Container) then
-    Exit;
-
-  if Container.Collapsed <> tbTrue then
+  wbTrySetContainer(aElement, aType, Container);
+  if Container = nil then
     Exit;
 
   // check for second struct
@@ -604,13 +526,8 @@ var
   Level, Ref, Count, ChanceNone: IwbElement;
   MainRecord: IwbMainRecord;
 begin
-  if aType <> ctToStr then
-    Exit;
-
-  if not Supports(aElement, IwbContainerElementRef, Container) then
-    Exit;
-
-  if Container.Collapsed <> tbTrue then
+  wbTrySetContainer(aElement, aType, Container);
+  if Container = nil then
     Exit;
 
   LeveledObject := Container.ElementBySignature['LVLO'] as IwbContainerElementRef;
@@ -639,26 +556,30 @@ end;
 
 procedure wbRecordHeaderToStr(var aValue: string; aBasePtr: Pointer; aEndPtr: Pointer; const aElement: IwbElement; aType: TwbCallbackType);
 var
-  RecordHeader: IwbContainerElementRef;
+  Container: IwbContainerElementRef;
   RecordFlags, FormVersion: IwbElement;
   MainRecord: IwbMainRecord;
+  RecordFlagsValue, DisplayValue: string;
 begin
-  if aType <> ctToStr then
+  wbTrySetContainer(aElement, aType, Container);
+  if Container = nil then
     Exit;
 
-  if not Supports(aElement, IwbContainerElementRef, RecordHeader) then
-    Exit;
+  MainRecord := Container.ContainingMainRecord;
+  RecordFlags := Container.ElementByName['Record Flags'];
+  FormVersion := Container.ElementByName['Form Version'];
 
-  if RecordHeader.Collapsed <> tbTrue then
-    Exit;
+  RecordFlagsValue := RecordFlags.Value;
 
-  MainRecord := RecordHeader.ContainingMainRecord;
-  RecordFlags := RecordHeader.ElementByName['Record Flags'];
-  FormVersion := RecordHeader.ElementByName['Form Version'];
+  DisplayValue := '[' + MainRecord.Signature + ':' + MainRecord.LoadOrderFormID.ToString(True) + ']';
 
-  aValue := '[v' + FormVersion.Value + '] [' + MainRecord.Signature + ':' + MainRecord.LoadOrderFormID.ToString(True) + ']';
-  if Length(RecordFlags.Value) > 0 then
-    aValue := aValue + ' {' + RecordFlags.Value + '}';
+  if wbGameMode = gmTES4 then
+    aValue := DisplayValue
+  else
+    aValue := '[v' + FormVersion.Value + '] ' + DisplayValue;
+
+  if Length(RecordFlagsValue) > 0 then
+    aValue := aValue + ' {' + RecordFlagsValue + '}';
 end;
 
 /// <summary>Fills PropertyType and PropertyValue from array assigned to property</summary>
@@ -679,9 +600,9 @@ end;
 procedure wbScriptPropertyObjectToStr(const aContainer: IwbContainerElementRef; var PropertyName: string; var PropertyType: string; var PropertyValue: string);
 var
   ObjectUnion: IwbContainerElementRef;
-  Version: string;
   FormID, Alias: IwbElement;
   MainRecord: IwbMainRecord;
+  AliasValue, Version: string;
 begin
   ObjectUnion := aContainer.ElementByPath['Value\Object Union'] as IwbContainerElementRef;
 
@@ -690,8 +611,10 @@ begin
   FormID := ObjectUnion.ElementByPath['Object ' + Version + '\FormID'];
   Alias := ObjectUnion.ElementByPath['Object ' + Version + '\Alias'];
 
+  AliasValue := Alias.Value;
+
   // compare length, too, because v1 doesn't default to 'None'
-  if not (CompareStr(Alias.Value, 'None') = 0) and not (Length(Alias.Value) = 0) then
+  if not (CompareStr(AliasValue, 'None') = 0) and not (Length(AliasValue) = 0) then
   begin
     PropertyType := 'Alias';
     PropertyName := Alias.EditValue;
@@ -710,13 +633,8 @@ var
   PropertyTypeElement: IwbElement;
   PropertyName, PropertyType, PropertyValue: string;
 begin
-  if aType <> ctToStr then
-    Exit;
-
-  if not Supports(aElement, IwbContainerElementRef, Container) then
-    Exit;
-
-  if Container.Collapsed <> tbTrue then
+  wbTrySetContainer(aElement, aType, Container);
+  if Container = nil then
     Exit;
 
   PropertyTypeElement := Container.ElementByName['Type'];
@@ -769,13 +687,8 @@ var
   R, G, B, RGB: string;
   AlphaDefType: TwbDefType;
 begin
-  if aType <> ctToStr then
-    Exit;
-
-  if not Supports(aElement, IwbContainerElementRef, Container) then
-    Exit;
-
-  if Container.Collapsed <> tbTrue then
+  wbTrySetContainer(aElement, aType, Container);
+  if Container = nil then
     Exit;
 
   R := Container.Elements[0].Value;
@@ -806,13 +719,8 @@ var
   Container: IwbContainerElementRef;
   X, Y, Z: string;
 begin
-  if aType <> ctToStr then
-    Exit;
-
-  if not Supports(aElement, IwbContainerElementRef, Container) then
-    Exit;
-
-  if Container.Collapsed <> tbTrue then
+  wbTrySetContainer(aElement, aType, Container);
+  if Container = nil then
     Exit;
 
   X := Container.Elements[0].Value;
@@ -828,71 +736,6 @@ function wbScriptObjFormatDecider(aBasePtr: Pointer; aEndPtr: Pointer; const aEl
 begin
   Result := wbGetScriptObjFormat(aElement);
 end;
-
-{>>> For Definitions <<<}
-
-//function wbIntVec3(const aName: string): IwbValueDef;
-//begin
-//  Result := wbStruct(aName, [
-//    wbInteger('X', itU8),
-//    wbInteger('Y', itU8),
-//    wbInteger('Z', itU8)
-//  ]).SetToStr(wbVec3ToStr).IncludeFlag(dfCollapsed, wbCollapseVec3);
-//end;
-//
-//function wbIntVec3U16(const aName: string): IwbValueDef;
-//begin
-//  Result := wbStruct(aName, [
-//    wbInteger('X', itU16),
-//    wbInteger('Y', itU16),
-//    wbInteger('Z', itU16)
-//  ]).SetToStr(wbVec3ToStr).IncludeFlag(dfCollapsed, wbCollapseVec3);
-//end;
-//
-//function wbIntVec3Named(const aSignature: TwbSignature; const aName: string): IwbValueDef;
-//begin
-//  Result := wbStruct(aSignature, aName, [
-//    wbInteger('X', itS16),
-//    wbInteger('Y', itS16),
-//    wbInteger('Z', itS16)
-//  ]).SetToStr(wbVec3ToStr).IncludeFlag(dfCollapsed, wbCollapseVec3)
-//end;
-//
-//function wbVec3(const aName: string): IwbValueDef;
-//begin
-//  Result := wbStruct(aName, [
-//    wbFloat('X'),
-//    wbFloat('Y'),
-//    wbFloat('Z')
-//  ]).SetToStr(wbVec3ToStr).IncludeFlag(dfCollapsed, wbCollapseVec3);
-//end;
-//
-//function wbVec3Named(const aSignature: TwbSignature; const aName: string): IwbValueDef;
-//begin
-//  Result := wbStruct(aSignature, aName, [
-//    wbFloat('X'),
-//    wbFloat('Y'),
-//    wbFloat('Z')
-//  ]).SetToStr(wbVec3ToStr).IncludeFlag(dfCollapsed, wbCollapseVec3);
-//end;
-//
-//function wbVec3SK(const aSortKey: array of Integer; const aName: string): IwbValueDef;
-//begin
-//  Result := wbStructSK(aSortKey, aName, [
-//    wbFloat('X'),
-//    wbFloat('Y'),
-//    wbFloat('Z')
-//  ]).SetToStr(wbVec3ToStr).IncludeFlag(dfCollapsed, wbCollapseVec3);
-//end;
-//
-//function wbVec3Rotation: IwbValueDef;
-//begin
-//  Result := wbStruct('Rotation', [
-//    wbFloat('X', cpNormal, True, wbRotationFactor, wbRotationScale, nil, RadiansNormalize),
-//    wbFloat('Y', cpNormal, True, wbRotationFactor, wbRotationScale, nil, RadiansNormalize),
-//    wbFloat('Z', cpNormal, True, wbRotationFactor, wbRotationScale, nil, RadiansNormalize)
-//  ]).SetToStr(wbVec3ToStr).IncludeFlag(dfCollapsed, wbCollapseVec3);
-//end;
 
 end.
 
